@@ -2,12 +2,12 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 )
 
 var path string
@@ -15,6 +15,8 @@ var addr string
 
 var lock sync.Mutex
 var ratio int // value could be 0, 100 or anything in between
+var good uint64
+var bad uint64
 
 func main() {
 	if len(os.Args) != 2 {
@@ -33,14 +35,25 @@ func main() {
 			i, err := strconv.Atoi(end)
 			if err == nil && ratio >= 0 && ratio <= 100 {
 				ratio = i
+				good = 0
+				bad = 0
 				w.Write([]byte("updated\n"))
 				return
 			}
 		}
-		if int64(ratio) > time.Now().UnixNano()%100 {
+		// if we serve an ok the ratio would be:
+		a := float64(bad) / float64(good+1+bad)
+		// if we serve an error the ratio would be:
+		b := float64(bad+1) / float64(good+bad+1)
+
+		ratioNorm := float64(ratio) / 100
+
+		if math.Abs(b-ratioNorm) < math.Abs(a-ratioNorm) {
+			bad += 1
 			http.Error(w, "panic.", http.StatusInternalServerError)
 			return
 		}
+		good += 1
 		w.Write([]byte("ok\n"))
 	})
 	http.ListenAndServe(addr, nil)
