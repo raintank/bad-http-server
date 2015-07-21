@@ -3,15 +3,19 @@ package main
 import (
 	"math"
 	"net/http"
+	"sync"
 )
 
 type Endpoint struct {
+	sync.Mutex
 	Ratio int // value could be 0, 100 or anything in between
 	Good  uint64
 	Bad   uint64
 }
 
 func (e *Endpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	e.Lock()
+	defer e.Unlock()
 	// if we serve an ok the ratio would be:
 	a := float64(e.Bad) / float64(e.Good+1+e.Bad)
 	// if we serve an error the ratio would be:

@@ -1,20 +1,16 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 var path string
 var addr string
-
-var lock sync.Mutex
 
 func main() {
 	if len(os.Args) != 2 {
@@ -24,15 +20,15 @@ func main() {
 	addr = os.Args[1]
 	fmt.Println("will listen for http traffic on", addr)
 
-	endpoints := make(map[string]*Endpoint)
+	endpoints := NewEndpoints()
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" && r.URL.Path != "" {
 			http.Error(w, "empty path", http.StatusBadRequest)
 		}
-		lock.Lock()
-		defer lock.Unlock()
-		js, err := json.Marshal(endpoints)
+		endpoints.Lock()
+		defer endpoints.Unlock()
+		js, err := endpoints.Json()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -45,7 +41,9 @@ func main() {
 			http.Error(w, "empty key", http.StatusBadRequest)
 			return
 		}
-		e, ok := endpoints[r.URL.Path]
+		endpoints.Lock()
+		defer endpoints.Unlock()
+		e, ok := endpoints.Get(r.URL.Path)
 		if ok {
 			e.ServeHTTP(w, r)
 			return
@@ -55,14 +53,16 @@ func main() {
 			http.Error(w, "bad ratio (should be a percentage between 0 and 100, inclusive)", http.StatusBadRequest)
 			return
 		}
-		endpoints[r.URL.Path] = New(badRatio).Serve(w, r)
+		endpoints.Add(r.URL.Path, New(badRatio).Serve(w, r))
 	})
 	http.HandleFunc("/custom/", func(w http.ResponseWriter, r *http.Request) {
 		if len(r.URL.Path) == 8 {
 			http.Error(w, "empty key", http.StatusBadRequest)
 			return
 		}
-		e, ok := endpoints[r.URL.Path]
+		endpoints.Lock()
+		defer endpoints.Unlock()
+		e, ok := endpoints.Get(r.URL.Path)
 		if ok {
 			e.ServeHTTP(w, r)
 			return
@@ -74,7 +74,7 @@ func main() {
 		}
 		pos := strings.LastIndex(remainder, "/")
 		if pos == -1 {
-			endpoints[r.URL.Path] = New(0).Serve(w, r)
+			endpoints.Add(r.URL.Path, New(0).Serve(w, r))
 			return
 		}
 		badRatio, err := strconv.Atoi(remainder[pos+1:])
@@ -83,11 +83,11 @@ func main() {
 			return
 		}
 		key := "/custom/" + remainder[:pos]
-		e, ok = endpoints[key]
+		e, ok = endpoints.Get(key)
 		if ok {
 			e.Ratio = badRatio
 		} else {
-			endpoints[key] = New(badRatio)
+			endpoints.Add(key, New(badRatio))
 		}
 		w.Write([]byte("updated\n"))
 	})
