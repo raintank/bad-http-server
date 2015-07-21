@@ -1,8 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
-	"math"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -14,9 +15,6 @@ var path string
 var addr string
 
 var lock sync.Mutex
-var ratio int // value could be 0, 100 or anything in between
-var good uint64
-var bad uint64
 
 func main() {
 	if len(os.Args) != 2 {
@@ -26,35 +24,83 @@ func main() {
 	addr = os.Args[1]
 	fmt.Println("will listen for http traffic on", addr)
 
+	endpoints := make(map[string]*Endpoint)
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" && r.URL.Path != "" {
+			http.Error(w, "empty path", http.StatusBadRequest)
+		}
 		lock.Lock()
 		defer lock.Unlock()
-		cutoff := strings.LastIndex(r.URL.Path, "/")
-		end := r.URL.Path[cutoff+1:]
-		if end != "" {
-			i, err := strconv.Atoi(end)
-			if err == nil && ratio >= 0 && ratio <= 100 {
-				ratio = i
-				good = 0
-				bad = 0
-				w.Write([]byte("updated\n"))
-				return
-			}
-		}
-		// if we serve an ok the ratio would be:
-		a := float64(bad) / float64(good+1+bad)
-		// if we serve an error the ratio would be:
-		b := float64(bad+1) / float64(good+bad+1)
-
-		ratioNorm := float64(ratio) / 100
-
-		if math.Abs(b-ratioNorm) < math.Abs(a-ratioNorm) {
-			bad += 1
-			http.Error(w, "panic.", http.StatusInternalServerError)
+		js, err := json.Marshal(endpoints)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		good += 1
-		w.Write([]byte("ok\n"))
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
 	})
-	http.ListenAndServe(addr, nil)
+	http.HandleFunc("/bad/", func(w http.ResponseWriter, r *http.Request) {
+		if len(r.URL.Path) == 5 {
+			http.Error(w, "empty key", http.StatusBadRequest)
+			return
+		}
+		e, ok := endpoints[r.URL.Path]
+		if ok {
+			e.ServeHTTP(w, r)
+			return
+		}
+		badRatio, err := strconv.Atoi(r.URL.Path[5:])
+		if err != nil || badRatio < 0 || badRatio > 100 {
+			http.Error(w, "bad ratio (should be a percentage between 0 and 100, inclusive)", http.StatusBadRequest)
+			return
+		}
+		e = &Endpoint{
+			Ratio: badRatio,
+		}
+		endpoints[r.URL.Path] = e
+		e.ServeHTTP(w, r)
+	})
+	http.HandleFunc("/custom/", func(w http.ResponseWriter, r *http.Request) {
+		if len(r.URL.Path) == 8 {
+			http.Error(w, "empty key", http.StatusBadRequest)
+			return
+		}
+		e, ok := endpoints[r.URL.Path]
+		if ok {
+			e.ServeHTTP(w, r)
+			return
+		}
+		remainder := r.URL.Path[8:]
+		if strings.Count(remainder, "/") > 1 {
+			http.Error(w, "too many slashes", http.StatusBadRequest)
+			return
+		}
+		pos := strings.LastIndex(remainder, "/")
+		if pos == -1 {
+			e = &Endpoint{
+				Ratio: 0,
+			}
+			endpoints[r.URL.Path] = e
+			e.ServeHTTP(w, r)
+			return
+		}
+		badRatio, err := strconv.Atoi(remainder[pos+1:])
+		if err != nil || badRatio < 0 || badRatio > 100 {
+			http.Error(w, "bad ratio (should be a percentage between 0 and 100, inclusive)", http.StatusBadRequest)
+			return
+		}
+		key := "/custom/" + remainder[:pos]
+		e, ok = endpoints[key]
+		if ok {
+			e.Ratio = badRatio
+		} else {
+			e = &Endpoint{
+				Ratio: badRatio,
+			}
+			endpoints[key] = e
+		}
+		w.Write([]byte("updated\n"))
+	})
+	log.Fatal(http.ListenAndServe(addr, nil))
 }
