@@ -27,3 +27,15 @@ func (e *Endpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok\n"))
 	}
 }
+
+func New(ratio int) *Endpoint {
+	e := &Endpoint{
+		Ratio: ratio,
+	}
+	return e
+}
+
+func (e *Endpoint) Serve(w http.ResponseWriter, r *http.Request) *Endpoint {
+	e.ServeHTTP(w, r)
+	return e
+}
