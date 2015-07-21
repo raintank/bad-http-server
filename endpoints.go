@@ -25,6 +25,6 @@ func (e *Endpoints) Get(key string) (*Endpoint, bool) {
 	r, ok := e.endpoints[key]
 	return r, ok
 }
-func (e *Endpoints) Add(key string, endp *Endpoint) {
+func (e *Endpoints) Set(key string, endp *Endpoint) {
 	e.endpoints[key] = endp
 }

@@ -53,7 +53,7 @@ func main() {
 			http.Error(w, "bad ratio (should be a percentage between 0 and 100, inclusive)", http.StatusBadRequest)
 			return
 		}
-		endpoints.Add(r.URL.Path, New(badRatio).Serve(w, r))
+		endpoints.Set(r.URL.Path, New(badRatio).Serve(w, r))
 	})
 	http.HandleFunc("/custom/", func(w http.ResponseWriter, r *http.Request) {
 		if len(r.URL.Path) == 8 {
@@ -74,7 +74,7 @@ func main() {
 		}
 		pos := strings.LastIndex(remainder, "/")
 		if pos == -1 {
-			endpoints.Add(r.URL.Path, New(0).Serve(w, r))
+			endpoints.Set(r.URL.Path, New(0).Serve(w, r))
 			return
 		}
 		badRatio, err := strconv.Atoi(remainder[pos+1:])
@@ -83,12 +83,7 @@ func main() {
 			return
 		}
 		key := "/custom/" + remainder[:pos]
-		e, ok = endpoints.Get(key)
-		if ok {
-			e.Ratio = badRatio
-		} else {
-			endpoints.Add(key, New(badRatio))
-		}
+		endpoints.Set(key, New(badRatio))
 		w.Write([]byte("updated\n"))
 	})
 	log.Fatal(http.ListenAndServe(addr, nil))
