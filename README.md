@@ -10,13 +10,25 @@ $ ./bad-http-server localhost:8888
 will listen for http traffic on localhost:8888
 ```
 
-## fixed ratio based on url
+## fixed ratio for replies based on url
 
 ```
-http://localhost:8888/bad/X
+http://localhost:8888/reply/X
 ```
 
-Ratio of bad replies will always be 0 <= X <= 100.
+For 0 <= X <= 100, each reply will be such that the ratio of bad/good replies so far matches X as closely as possible.
+
+## fixed ratio for client ip's based on url
+
+```
+http://localhost:8888/client/X
+```
+
+Creates a bucket of clients that get always good responses, and a bucket of clients that always get bad responses.
+Clients seen in the last 5 minutes are partitioned into buckets based on their ip, so that
+num-clients-bad/num-clients-good matches X as closely as possible.
+(note for now ratio can get off balance if clients disappear and no new ones appear.)
+
 
 ## adjustable ratio based on url
 
@@ -26,9 +38,10 @@ http://localhost:8888/custom/KEY/
 http://localhost:8888/custom/KEY/X
 ```
 
-The first two forms are similar to above, but with a default ratio of 0.
+The first two forms are similar to /reply/ above, but with a default ratio of 0.
 KEY must not contain slashes.
-The third form updates the ratio. for example:
+The third form updates the ratio. 0 <= X <= 100.
+for example:
 
 ```
 http://localhost:8888/custom/test-on-the-fly
