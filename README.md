@@ -29,9 +29,17 @@ For 0 <= X <= 100, each reply will be such that the ratio of bad/good replies so
 http://localhost:8888/static-by-ip/X
 ```
 
-Clients seen in the last 5 minutes are partitioned into buckets based on their ip, a bucket for good responses,
+Clients seen are partitioned into buckets based on their ip, a bucket for good responses,
 one for bad responses, where num-clients-bad/num-clients-good matches X as closely as possible.
-(note for now ratio can get off balance if clients disappear and no new ones appear.)
+
+Btw, maintaining ip to bucket assignements can be tricky due to :
+a) clients appearing and disappearing
+b) the desire for clients to "stick" to a bucket. (a key use case of this tool is verifying [worldping](https://grafana.com/plugins/raintank-worldping-app) alerting, which is typically configured to look at streaks of errors for the same clients)
+c) having a small set of clients, often only a few. this rules out consistent hashing which would otherwise be a great choice.
+
+Buckets are rebalanced when:
+a) the ratio hasn't been updated for an hour (doesn't apply here, but applies for dynamic-by-ip below)
+b) clients have gone missing for at least an hour
 
 
 ## dynamic ratio based on url

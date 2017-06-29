@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -8,46 +9,17 @@ import (
 )
 
 type Client struct {
-	Ip   string
-	Seen time.Time
-	Good uint64
-	Bad  uint64
+	Ip      string
+	Updated time.Time
+	Good    uint64
+	Bad     uint64
 }
 
-type Clients struct {
-	Clients []*Client
-}
-
-func (cl *Clients) Add(ip string, now time.Time) *Client {
-	client := &Client{
-		Ip:   ip,
-		Seen: now,
+func NewClient(ip string) *Client {
+	return &Client{
+		Ip:      ip,
+		Updated: time.Now(),
 	}
-	for i, c := range cl.Clients {
-		if c == nil {
-			cl.Clients[i] = client
-			return client
-		}
-	}
-	cl.Clients = append(cl.Clients, client)
-	return client
-}
-
-func (cl *Clients) Update(now, cutoff time.Time, ip string) *Client {
-	var client *Client
-	for i, c := range cl.Clients {
-		if c == nil {
-			continue
-		}
-		if c.Ip == ip {
-			c.Seen = now
-			client = c
-		}
-		if c.Seen.Before(cutoff) {
-			cl.Clients[i] = nil
-		}
-	}
-	return client
 }
 
 // EndpointByIp keeps 2 buckets of active clients by response they will get.
@@ -56,56 +28,115 @@ func (cl *Clients) Update(now, cutoff time.Time, ip string) *Client {
 // but we don't need to care about that for now.
 type EndpointByIp struct {
 	sync.Mutex
-	Ratio int // value could be 0, 100 or anything in between
-	Good  Clients
-	Bad   Clients
+	Ratio          int // value could be 0, 100 or anything in between
+	updated        time.Time
+	Bad            []*Client
+	Good           []*Client
+	DroppedClients uint64
 }
 
 func NewEndpointByIp(ratio int) Endpoint {
-	return &EndpointByIp{
-		Ratio: ratio,
+	e := &EndpointByIp{
+		Ratio:   ratio,
+		updated: time.Now(),
+	}
+	go e.clean()
+	return e
+}
+
+// clean will rebalance the good/bad buckets if these 2 conditions apply:
+// * any of the clients hasn't been seen in an hour
+// * the ratio hasn't been updated in an hour
+// the rebalance aims to be stable (don't needlessly change assignments)
+func (e *EndpointByIp) clean() {
+	for range time.Tick(time.Hour) {
+		e.Lock()
+		if time.Now().Sub(e.updated) > time.Hour {
+			var good []*Client
+			var bad []*Client
+			var dropped uint64
+			for _, c := range e.Good {
+				if time.Now().Sub(c.Updated) < time.Hour {
+					good = append(good, c)
+				} else {
+					dropped += 1
+				}
+				for _, c := range e.Bad {
+					if time.Now().Sub(c.Updated) < time.Hour {
+						bad = append(bad, c)
+					} else {
+						dropped += 1
+					}
+				}
+				if dropped != 0 {
+					e.DroppedClients += dropped
+					e.rebalance(good, bad)
+				}
+			}
+		}
+		e.Unlock()
 	}
 }
 
-// prunes out any stale ips if needed
-// assures the ip is in the pool.
-// assures the ratio is as close to the ideal as possible. (TODO: for now we only do this for new clients, should maintain this at all times)
-// returns the Client object and whether it's in the fail group
-func (ec *EndpointByIp) Update(ip string) (client *Client, fail bool) {
-	now := time.Now()
-	cutoff := now.Add(-time.Duration(5) * time.Minute)
-	clientGood := ec.Good.Update(now, cutoff, ip)
-	clientBad := ec.Bad.Update(now, cutoff, ip)
-	if clientGood != nil && clientBad != nil {
-		panic("client was found both in good and bad")
+// rebalance will rebalance buckets with given starting points for good and bad
+// caller must hold lock
+func (e *EndpointByIp) rebalance(good, bad []*Client) {
+	total := len(good) + len(bad)
+	// numBad can be anywhere from 0 to total (inclusive)
+	numBad := int(math.Floor((float64(total) * float64(e.Ratio) / 100) + 0.5))
+	//fmt.Printf("rebalancing: good %v - bad %v . numBad: %d\n", good, bad, numBad)
+
+	// move clients from good to bad as needed
+	for len(bad) < numBad {
+		//fmt.Println("moving to bad")
+		bad = append(bad, good[len(good)-1])
+		good = good[:len(good)-1]
 	}
-	if clientBad != nil {
-		fail = true
-		client = clientBad
+
+	// move clients from bad to good as needed
+	for len(bad) > numBad {
+		//fmt.Println("moving to good")
+		good = append(good, bad[len(bad)-1])
+		bad = bad[:len(bad)-1]
 	}
-	if clientGood != nil {
-		client = clientGood
-	}
-	if client == nil {
-		if closestRatio(float64(ec.Ratio)/100, float64(len(ec.Bad.Clients)), float64(len(ec.Good.Clients))) {
-			client = ec.Bad.Add(ip, now)
-			fail = true
-		} else {
-			client = ec.Good.Add(ip, now)
+
+	e.Good = good
+	e.Bad = bad
+}
+
+func (ec *EndpointByIp) addOrUpdate(ip string) (client *Client, fail bool) {
+	for _, c := range ec.Good {
+		if c.Ip == ip {
+			c.Updated = time.Now()
+			return c, false
 		}
+
 	}
-	return client, fail
+	for _, c := range ec.Bad {
+		if c.Ip == ip {
+			c.Updated = time.Now()
+			return c, true
+		}
+
+	}
+	c := NewClient(ip)
+	if closestRatio(float64(ec.Ratio)/100, float64(len(ec.Bad)), float64(len(ec.Good))) {
+		ec.Bad = append(ec.Bad, c)
+		return c, true
+	}
+	ec.Good = append(ec.Good, c)
+	return c, false
 }
 
 func (e *EndpointByIp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	e.Lock()
-	defer e.Unlock()
 	i := strings.LastIndex(r.RemoteAddr, ":")
 	if i == -1 {
 		panic("unrecognized remote addr " + r.RemoteAddr)
 	}
 	ip := r.RemoteAddr[:i]
-	client, fail := e.Update(ip)
+	e.Lock()
+	defer e.Unlock()
+	client, fail := e.addOrUpdate(ip)
 	if fail {
 		client.Bad += 1
 		http.Error(w, "panic.", http.StatusInternalServerError)
@@ -116,5 +147,9 @@ func (e *EndpointByIp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (e *EndpointByIp) Update(ratio int) {
+	e.Lock()
 	e.Ratio = ratio
+	e.rebalance(e.Good, e.Bad)
+	e.updated = time.Now()
+	e.Unlock()
 }
