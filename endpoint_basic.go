@@ -5,15 +5,21 @@ import (
 	"sync"
 )
 
-// EndpointReply aims for the given ratio by counting individual replies.
-type EndpointReply struct {
+// EndpointBasic aims for the given ratio by counting individual replies.
+type EndpointBasic struct {
 	sync.Mutex
 	Ratio int // value could be 0, 100 or anything in between
 	Good  uint64
 	Bad   uint64
 }
 
-func (e *EndpointReply) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func NewEndpointBasic(ratio int) Endpoint {
+	return &EndpointBasic{
+		Ratio: ratio,
+	}
+}
+
+func (e *EndpointBasic) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	e.Lock()
 	defer e.Unlock()
 
@@ -26,9 +32,8 @@ func (e *EndpointReply) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func NewEndpointReply(ratio int) Endpoint {
-	e := &EndpointReply{
-		Ratio: ratio,
-	}
-	return e
+func (e *EndpointBasic) Update(ratio int) {
+	e.Lock()
+	e.Ratio = ratio
+	e.Unlock()
 }

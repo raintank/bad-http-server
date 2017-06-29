@@ -50,22 +50,28 @@ func (cl *Clients) Update(now, cutoff time.Time, ip string) *Client {
 	return client
 }
 
-// EndpointClient keeps 2 buckets of active clients by response they will get.
+// EndpointByIp keeps 2 buckets of active clients by response they will get.
 // the size of the buckets matches the ratio as closely as possible.
 // note: if we keep the Clients sorted, than results would be more consistent in light of pool changes
 // but we don't need to care about that for now.
-type EndpointClient struct {
+type EndpointByIp struct {
 	sync.Mutex
 	Ratio int // value could be 0, 100 or anything in between
 	Good  Clients
 	Bad   Clients
 }
 
+func NewEndpointByIp(ratio int) Endpoint {
+	return &EndpointByIp{
+		Ratio: ratio,
+	}
+}
+
 // prunes out any stale ips if needed
 // assures the ip is in the pool.
 // assures the ratio is as close to the ideal as possible. (TODO: for now we only do this for new clients, should maintain this at all times)
 // returns the Client object and whether it's in the fail group
-func (ec *EndpointClient) Update(ip string) (client *Client, fail bool) {
+func (ec *EndpointByIp) Update(ip string) (client *Client, fail bool) {
 	now := time.Now()
 	cutoff := now.Add(-time.Duration(5) * time.Minute)
 	clientGood := ec.Good.Update(now, cutoff, ip)
@@ -91,7 +97,7 @@ func (ec *EndpointClient) Update(ip string) (client *Client, fail bool) {
 	return client, fail
 }
 
-func (e *EndpointClient) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (e *EndpointByIp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	e.Lock()
 	defer e.Unlock()
 	i := strings.LastIndex(r.RemoteAddr, ":")
@@ -109,9 +115,6 @@ func (e *EndpointClient) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func NewEndpointClient(ratio int) Endpoint {
-	e := &EndpointClient{
-		Ratio: ratio,
-	}
-	return e
+func (e *EndpointByIp) Update(ratio int) {
+	e.Ratio = ratio
 }

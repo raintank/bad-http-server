@@ -36,74 +36,95 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 	})
-	http.HandleFunc("/reply/", func(w http.ResponseWriter, r *http.Request) {
-		if len(r.URL.Path) == len("/reply/") {
-			http.Error(w, "empty key", http.StatusBadRequest)
+	http.HandleFunc("/static/", func(w http.ResponseWriter, r *http.Request) {
+		key, ratio, err := parseKeyRatio(r.URL.Path, "/static/ratio")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+
 		endpoints.Lock()
 		defer endpoints.Unlock()
-		e, ok := endpoints.Get(r.URL.Path)
+		e, ok := endpoints.Get(key)
 		if !ok {
-			badRatio, err := strconv.Atoi(r.URL.Path[len("/reply/"):])
-			if err != nil || badRatio < 0 || badRatio > 100 {
-				http.Error(w, "bad ratio (should be a percentage between 0 and 100, inclusive)", http.StatusBadRequest)
-				return
-			}
-			e = NewEndpointReply(badRatio)
-			endpoints.Set(r.URL.Path, e)
+			e = NewEndpointBasic(ratio)
+			endpoints.Set(key, e)
 		}
 		e.ServeHTTP(w, r)
 	})
-	http.HandleFunc("/client/", func(w http.ResponseWriter, r *http.Request) {
-		if len(r.URL.Path) == len("/client/") {
-			http.Error(w, "empty key", http.StatusBadRequest)
+	http.HandleFunc("/static-by-ip/", func(w http.ResponseWriter, r *http.Request) {
+		key, ratio, err := parseKeyRatio(r.URL.Path, "/static-by-ip/ratio")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+
 		endpoints.Lock()
 		defer endpoints.Unlock()
-		e, ok := endpoints.Get(r.URL.Path)
+		e, ok := endpoints.Get(key)
 		if !ok {
-			badRatio, err := strconv.Atoi(r.URL.Path[len("/client/"):])
-			if err != nil || badRatio < 0 || badRatio > 100 {
-				http.Error(w, "bad ratio (should be a percentage between 0 and 100, inclusive)", http.StatusBadRequest)
-				return
-			}
-			e = NewEndpointClient(badRatio)
-			endpoints.Set(r.URL.Path, e)
+			e = NewEndpointByIp(ratio)
+			endpoints.Set(key, e)
 		}
 		e.ServeHTTP(w, r)
 	})
-	http.HandleFunc("/custom/", func(w http.ResponseWriter, r *http.Request) {
-		if len(r.URL.Path) == len("/custom/") {
-			http.Error(w, "empty key", http.StatusBadRequest)
+	http.HandleFunc("/dynamic/", func(w http.ResponseWriter, r *http.Request) {
+		key, ratio, err := parseDynamicKeyRatio(r.URL.Path, "/dynamic/key[/ratio]")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		endpoints.Lock()
 		defer endpoints.Unlock()
-		e, ok := endpoints.Get(r.URL.Path)
-		if ok {
-			e.ServeHTTP(w, r)
+
+		// user wants to update
+		if ratio != -1 {
+			e, ok := endpoints.Get(key)
+			if !ok {
+				http.Error(w, "not found", http.StatusBadRequest)
+			} else {
+				e.Update(ratio)
+				w.Write([]byte("updated\n"))
+			}
 			return
 		}
-		remainder := r.URL.Path[len("/custom/"):]
-		if strings.Count(remainder, "/") > 1 {
-			http.Error(w, "too many slashes", http.StatusBadRequest)
-			return
+
+		e, ok := endpoints.Get(key)
+		if !ok {
+			e = NewEndpointBasic(0)
+			endpoints.Set(key, e)
 		}
-		pos := strings.LastIndex(remainder, "/")
-		if pos == -1 {
-			endpoints.Set(r.URL.Path, NewEndpointReply(0).Serve(w, r))
-			return
-		}
-		badRatio, err := strconv.Atoi(remainder[pos+1:])
-		if err != nil || badRatio < 0 || badRatio > 100 {
-			http.Error(w, "bad ratio (should be a percentage between 0 and 100, inclusive)", http.StatusBadRequest)
-			return
-		}
-		key := "/custom/" + remainder[:pos]
-		endpoints.Set(key, NewEndpointReply(badRatio))
-		w.Write([]byte("updated\n"))
+		e.ServeHTTP(w, r)
 	})
+
+	http.HandleFunc("/dynamic-by-ip/", func(w http.ResponseWriter, r *http.Request) {
+		key, ratio, err := parseDynamicKeyRatio(r.URL.Path, "/dynamic-by-ip/key[/ratio]")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		endpoints.Lock()
+		defer endpoints.Unlock()
+
+		// user wants to update
+		if ratio != -1 {
+			e, ok := endpoints.Get(key)
+			if !ok {
+				http.Error(w, "not found", http.StatusBadRequest)
+			} else {
+				e.Update(ratio)
+				w.Write([]byte("updated\n"))
+			}
+			return
+		}
+
+		e, ok := endpoints.Get(key)
+		if !ok {
+			e = NewEndpointByIp(0)
+			endpoints.Set(key, e)
+		}
+		e.ServeHTTP(w, r)
+	})
+
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
