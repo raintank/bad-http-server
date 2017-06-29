@@ -32,8 +32,3 @@ func NewEndpointReply(ratio int) Endpoint {
 	}
 	return e
 }
-
-func (e *EndpointReply) Serve(w http.ResponseWriter, r *http.Request) Endpoint {
-	e.ServeHTTP(w, r)
-	return e
-}

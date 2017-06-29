@@ -4,5 +4,4 @@ import "net/http"
 
 type Endpoint interface {
 	ServeHTTP(w http.ResponseWriter, r *http.Request)
-	Serve(w http.ResponseWriter, r *http.Request) Endpoint
 }

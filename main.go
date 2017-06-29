@@ -44,16 +44,16 @@ func main() {
 		endpoints.Lock()
 		defer endpoints.Unlock()
 		e, ok := endpoints.Get(r.URL.Path)
-		if ok {
-			e.ServeHTTP(w, r)
-			return
+		if !ok {
+			badRatio, err := strconv.Atoi(r.URL.Path[len("/reply/"):])
+			if err != nil || badRatio < 0 || badRatio > 100 {
+				http.Error(w, "bad ratio (should be a percentage between 0 and 100, inclusive)", http.StatusBadRequest)
+				return
+			}
+			e = NewEndpointReply(badRatio)
+			endpoints.Set(r.URL.Path, e)
 		}
-		badRatio, err := strconv.Atoi(r.URL.Path[len("/reply/"):])
-		if err != nil || badRatio < 0 || badRatio > 100 {
-			http.Error(w, "bad ratio (should be a percentage between 0 and 100, inclusive)", http.StatusBadRequest)
-			return
-		}
-		endpoints.Set(r.URL.Path, NewEndpointReply(badRatio).Serve(w, r))
+		e.ServeHTTP(w, r)
 	})
 	http.HandleFunc("/client/", func(w http.ResponseWriter, r *http.Request) {
 		if len(r.URL.Path) == len("/client/") {
@@ -63,16 +63,16 @@ func main() {
 		endpoints.Lock()
 		defer endpoints.Unlock()
 		e, ok := endpoints.Get(r.URL.Path)
-		if ok {
-			e.ServeHTTP(w, r)
-			return
+		if !ok {
+			badRatio, err := strconv.Atoi(r.URL.Path[len("/client/"):])
+			if err != nil || badRatio < 0 || badRatio > 100 {
+				http.Error(w, "bad ratio (should be a percentage between 0 and 100, inclusive)", http.StatusBadRequest)
+				return
+			}
+			e = NewEndpointClient(badRatio)
+			endpoints.Set(r.URL.Path, e)
 		}
-		badRatio, err := strconv.Atoi(r.URL.Path[len("/client/"):])
-		if err != nil || badRatio < 0 || badRatio > 100 {
-			http.Error(w, "bad ratio (should be a percentage between 0 and 100, inclusive)", http.StatusBadRequest)
-			return
-		}
-		endpoints.Set(r.URL.Path, NewEndpointClient(badRatio).Serve(w, r))
+		e.ServeHTTP(w, r)
 	})
 	http.HandleFunc("/custom/", func(w http.ResponseWriter, r *http.Request) {
 		if len(r.URL.Path) == len("/custom/") {
